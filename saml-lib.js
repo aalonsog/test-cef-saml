@@ -54,7 +54,7 @@ SAMLError = (function(superClass) {
 
 })(Error);
 
-create_authn_request = function(issuer, assert_endpoint, destination, force_authn, context, nameid_format) {
+create_authn_request = function(issuer, assert_endpoint, destination, force_authn, context, nameid_format, extensions) {
   var context_element, id, xml;
   if (context != null) {
     context_element = _(context.class_refs).map(function(class_ref) {
@@ -87,6 +87,7 @@ create_authn_request = function(issuer, assert_endpoint, destination, force_auth
         '@Format': "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
         '#text': issuer
       },
+      'saml2p:Extensions' : extensions,
       'saml2p:NameIDPolicy': {
         '@AllowCreate': 'true',
         '@Format': nameid_format || 'urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified'
@@ -104,7 +105,7 @@ function MyKeyInfo(private_key) {
   this.getKeyInfo = function(key, prefix) {
     prefix = prefix || ''
     prefix = prefix ? prefix + ':' : prefix
-    return "<" + prefix + "X509Data>" + this.getKey() + "</" + prefix + "X509Data>"
+    return "<" + prefix + "X509Data><" + prefix + "X509Certificate>" + this.getKey() + "</" + prefix + "X509Certificate></" + prefix + "X509Data>"
   }
   this.getKey = function() {
     return extract_private_data(private_key);
@@ -122,7 +123,7 @@ sign_authn_request = function(xml, private_key, options) {
   return signer.getSignedXml();
 };
 
-create_metadata = function(entity_id, assert_endpoint, signing_certificates, encryption_certificates) {
+create_metadata = function(entity_id, assert_endpoint, signing_certificates, encryption_certificates, nameid_format, organization, contact) {
   var encryption_cert_descriptors, encryption_certificate, signing_cert_descriptors, signing_certificate;
   signing_cert_descriptors = (function() {
     var j, len, ref1, results;
@@ -152,25 +153,46 @@ create_metadata = function(entity_id, assert_endpoint, signing_certificates, enc
     'md:EntityDescriptor': {
       '@xmlns:md': XMLNS.MD,
       '@xmlns:ds': XMLNS.DS,
-      '@entityID': entity_id,
+      '@xmlns:entityID': XMLNS.MD,
+      'entityID': entity_id,
       '@validUntil': (new Date(Date.now() + 1000 * 60 * 60)).toISOString(),
       'md:SPSSODescriptor': [].concat({
-        '@protocolSupportEnumeration': 'urn:oasis:names:tc:SAML:1.1:protocol urn:oasis:names:tc:SAML:2.0:protocol'
+        '@AuthnRequestsSigned': true,
+        '@WantAssertionsSigned': 'True',
+        '@protocolSupportEnumeration': 'urn:oasis:names:tc:SAML:2.0:protocol'
       }).concat(signing_cert_descriptors).concat(encryption_cert_descriptors).concat([
         {
           'md:SingleLogoutService': {
             '@Binding': 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
             '@Location': assert_endpoint
           },
+          'md:NameIDFormat': nameid_format,
           'md:AssertionConsumerService': {
             '@Binding': 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST',
             '@Location': assert_endpoint,
-            '@index': '0'
+            '@index': '0',
+            '@isDefault': true
           }
         }
-      ])
+      ]),
+      'md:Organization': organization,
+      'md:ContactPerson': {
+        '@contactType' : 'technical',
+        '#text': contact
+      }
     }
   }).end();
+};
+
+sign_metadata = function(xml, private_key, options) {
+  var signer;
+  signer = new SignedXml(null, options);
+  signer.addReference("//*[local-name(.)='EntityDescriptor']", ['http://www.w3.org/2000/09/xmldsig#enveloped-signature', 'http://www.w3.org/2001/10/xml-exc-c14n#'], "http://www.w3.org/2001/04/xmlenc#sha512");
+  signer.signingKey = private_key;
+  signer.signatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512";
+  signer.keyInfoProvider = new MyKeyInfo(private_key);
+  signer.computeSignature(xml,{prefix: 'ds'});
+  return signer.getSignedXml();
 };
 
 create_logout_request = function(issuer, name_id, session_index, destination) {
@@ -726,6 +748,7 @@ module.exports.ServiceProvider = ServiceProvider = (function() {
     this.create_metadata = bind(this.create_metadata, this);
     this.create_logout_request_url = bind(this.create_logout_request_url, this);
     this.entity_id = options.entity_id, this.private_key = options.private_key, this.certificate = options.certificate, this.assert_endpoint = options.assert_endpoint, this.alt_private_keys = options.alt_private_keys, this.alt_certs = options.alt_certs;
+    this.organization = options.organization, this.contact = options.contact, this.nameid_format = options.nameid_format;
     if (options.audience == null) {
       options.audience = this.entity_id;
     }
@@ -770,7 +793,7 @@ module.exports.ServiceProvider = ServiceProvider = (function() {
   ServiceProvider.prototype.create_authn_request_xml = function(identity_provider, options) {
     var id, ref1, xml;
     options = set_option_defaults(options, identity_provider.shared_options, this.shared_options);
-    ref1 = create_authn_request(this.entity_id, this.assert_endpoint, identity_provider.sso_login_url, options.force_authn, options.auth_context, options.nameid_format), id = ref1.id, xml = ref1.xml;
+    ref1 = create_authn_request(this.entity_id, this.assert_endpoint, identity_provider.sso_login_url, options.force_authn, options.auth_context, options.nameid_format, options.extensions), id = ref1.id, xml = ref1.xml;
     console.log('-------original', xml);
     var signed = sign_authn_request(xml, this.private_key, options);
     console.log('--------sing 1', signed);
@@ -973,7 +996,11 @@ module.exports.ServiceProvider = ServiceProvider = (function() {
   ServiceProvider.prototype.create_metadata = function() {
     var certs;
     certs = [this.certificate].concat(this.alt_certs);
-    return create_metadata(this.entity_id, this.assert_endpoint, certs, certs);
+
+    var options = set_option_defaults(options, {}, this.shared_options);
+
+    var xml_meta = create_metadata(this.entity_id, this.assert_endpoint, certs, certs, this.nameid_format, this.organization, this.contact);
+    return sign_metadata(xml_meta, this.private_key, options);
   };
 
   return ServiceProvider;

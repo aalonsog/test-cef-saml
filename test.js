@@ -19,7 +19,9 @@ var sp_options = {
   sign_get_request: true,
   nameid_format: "urn:oasis:names:tc:SAML:2.0:nameid-format:transient",
   auth_context: { comparison: "minimum", class_refs: ["http://eidas.europa.eu/LoA/low"] },
-  force_authn: true
+  force_authn: true,
+  organization: 'Universidad Politecnica de Madrid',
+  contact: 'Alvaro Alonso'
 };
 
 var sp = new saml2.ServiceProvider(sp_options);
@@ -42,7 +44,48 @@ app.get("/metadata", function(req, res) {
  
 // Starting point for login
 app.get("/", function(req, res) {
-  var xml = sp.create_authn_request_xml(idp, {  });
+  var xml = sp.create_authn_request_xml(idp, {
+    extensions: {
+      'eidas:SPType': 'public',
+      'eidas:RequestedAttributes': [
+        {'eidas:RequestedAttribute': {
+          '@FriendlyName': 'LegalName',
+          '@Name': 'http://eidas.europa.eu/attributes/legalperson/LegalName',
+          '@NameFormat': 'urn:oasis:names:tc:SAML:2.0:attrname-format:uri',
+          '@isRequired': 'true'
+        }},
+        {'eidas:RequestedAttribute': {
+          '@FriendlyName': 'LegalPersonIdentifier',
+          '@Name': 'http://eidas.europa.eu/attributes/legalperson/LegalPersonIdentifier',
+          '@NameFormat': 'urn:oasis:names:tc:SAML:2.0:attrname-format:uri',
+          '@isRequired': 'true'
+        }},
+        {'eidas:RequestedAttribute': {
+          '@FriendlyName': 'FamilyName',
+          '@Name': 'http://eidas.europa.eu/attributes/naturalperson/CurrentFamilyName',
+          '@NameFormat': 'urn:oasis:names:tc:SAML:2.0:attrname-format:uri',
+          '@isRequired': 'true'
+        }},
+        {'eidas:RequestedAttribute': {
+          '@FriendlyName': 'FirstName',
+          '@Name': 'http://eidas.europa.eu/attributes/naturalperson/CurrentGivenName',
+          '@NameFormat': 'urn:oasis:names:tc:SAML:2.0:attrname-format:uri',
+          '@isRequired': 'true'
+        }},
+        {'eidas:RequestedAttribute': {
+          '@FriendlyName': 'DateOfBirth',
+          '@Name': 'http://eidas.europa.eu/attributes/naturalperson/DateOfBirth',
+          '@NameFormat': 'urn:oasis:names:tc:SAML:2.0:attrname-format:uri',
+          '@isRequired': 'true'
+        }},
+        {'eidas:RequestedAttribute': {
+          '@FriendlyName': 'PersonIdentifier',
+          '@Name': 'http://eidas.europa.eu/attributes/naturalperson/PersonIdentifier',
+          '@NameFormat': 'urn:oasis:names:tc:SAML:2.0:attrname-format:uri',
+          '@isRequired': 'true'
+        }}]
+      }
+  });
   res.render('index', {body:xml});
 });
 
