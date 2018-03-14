@@ -1,0 +1,11 @@
+<%=body%>
+<form action="/login" method="POST">
+  XML:<br>
+  <input type="text" name="SAMLRequest" value="<%=body%>"><br><br>
+  <input type="text" name="postLocationUrl" value="http://yosi.dit.upm.es"><br><br>
+  <input type="text" name="redirectLocationUrl" value="http://yosi.dit.upm.es"><br><br>
+  <input type="text" name="country" value="ES"><br><br>
+  <input type="text" name="RelayState" value="MyRelayState"><br><br>
+  <input type="text" name="sendmethods" value="POST"><br><br>
+  <input type="submit" value="Submit">
+</form>
